@@ -8,56 +8,40 @@ import tensorflow as tf
 import requests
 import matplotlib.pyplot as plt
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from xgboost import XGBRegressor
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, r2_score
 import os
 import matplotlib.dates as mdates
-from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import LSTM, Dense, Dropout, Conv1D, MaxPooling1D, Flatten, BatchNormalization
 from tensorflow.keras.callbacks import EarlyStopping
 
-
-import requests
-import pandas as pd
-import streamlit as st
-
-def fetch_binance_data(symbol="BNBUSDT", interval="1d", limit=1000):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    
+# ✅ ใช้ Yahoo Finance แทน Binance API
+def fetch_yahoo_data(symbol="BNB-USD", period="1y"):
     try:
-        response = requests.get(url)
-        response.raise_for_status()  # ตรวจสอบ HTTP Error (เช่น 404, 500)
-        data = response.json()
-        
-        if not data:
-            st.error("❌ ไม่พบข้อมูลจาก Binance API")
-            return pd.DataFrame()  # ส่ง DataFrame ว่างกลับไป
+        df = yf.download(symbol, period=period, interval="1d")
 
-        # แปลง JSON เป็น DataFrame
-        df = pd.DataFrame(data, columns=[
-            "timestamp", "open", "high", "low", "close", "volume", "close_time",
-            "quote_asset_volume", "trades", "taker_buy_base_asset_volume",
-            "taker_buy_quote_asset_volume", "ignore"
-        ])
+        if df.empty:
+            st.error("❌ ไม่สามารถดึงข้อมูลจาก Yahoo Finance")
+            return pd.DataFrame()
 
-        df = df[["timestamp", "open", "high", "low", "close", "volume", "trades"]]
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+        df = df.reset_index()
+        df = df.rename(columns={"Date": "timestamp", "Open": "open", "High": "high",
+                                "Low": "low", "Close": "close", "Volume": "volume"})
 
-        # แปลงค่าเป็นตัวเลข
-        df[["open", "high", "low", "close", "volume", "trades"]] = df[[
-            "open", "high", "low", "close", "volume", "trades"]].astype(float)
+        df["trades"] = 0  # ตั้งค่าให้เป็น 0 หรือ NaN ได้
 
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
         return df
-    
-    except requests.exceptions.RequestException as e:
-        st.error(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูลจาก Binance API: {e}")
+
+    except Exception as e:
+        st.error(f"❌ เกิดข้อผิดพลาด: {e}")
         return pd.DataFrame()
 
-
-
+# ✅ ฟังก์ชันเพิ่มตัวชี้วัดทางเทคนิค
 def add_indicators(df):
     df["MA_7"] = df["close"].rolling(window=7).mean()
     df["MA_14"] = df["close"].rolling(window=14).mean()
@@ -65,16 +49,16 @@ def add_indicators(df):
     df["EMA_14"] = df["close"].ewm(span=14, adjust=False).mean()
     df["RSI_14"] = 100 - (100 / (1 + (df["close"].diff(1).clip(lower=0).rolling(
         14).mean() / df["close"].diff(1).clip(upper=0).abs().rolling(14).mean())))
+
     df["Daily_Return"] = df["close"].pct_change() * 100
     df.dropna(inplace=True)
     return df
 
-
+# ✅ เทรนโมเดลและให้ผู้ใช้ดาวน์โหลด
 def train_and_save_model(df, symbol):
     features = ["MA_7", "MA_14", "EMA_7", "EMA_14", "RSI_14", "Daily_Return"]
     target = "close"
 
-    # ตรวจสอบว่า DataFrame มีข้อมูลพอหรือไม่
     if df.empty:
         st.error("❌ ข้อมูลว่าง! ไม่สามารถเทรนโมเดลได้")
         return None, None
@@ -82,12 +66,10 @@ def train_and_save_model(df, symbol):
     X = df[features]
     y = df[target]
 
-    # ตรวจสอบค่าที่หายไป (NaN)
     if X.isnull().sum().sum() > 0 or y.isnull().sum() > 0:
         st.error("❌ มีค่าที่หายไปในข้อมูล! กรุณาตรวจสอบ DataFrame")
         return None, None
 
-    # แบ่งข้อมูล train/test
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
 
@@ -101,7 +83,7 @@ def train_and_save_model(df, symbol):
         "XGBoost": XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
     }
 
-    results = {}  # เก็บผลลัพธ์ของแต่ละโมเดล
+    results = {}
     for name, model in models.items():
         model.fit(X_train_scaled, y_train)
         y_pred = model.predict(X_test_scaled)
@@ -109,24 +91,20 @@ def train_and_save_model(df, symbol):
         r2 = r2_score(y_test, y_pred)
         results[name] = {"MAE": mae, "R² Score": r2}
 
-    # เลือกโมเดลที่ดีที่สุด
     best_model_name = max(results, key=lambda x: results[x]["R² Score"])
     best_model = models[best_model_name]
 
-    # บันทึกโมเดลและ Scaler
     model_filename = f"{symbol.lower()}_best_model.pkl"
-    scaler_filename = f"{symbol.lower()}_scaler.pkl"
-
     joblib.dump(best_model, model_filename)
-    joblib.dump(scaler, scaler_filename)
 
     st.success(f"✅ เทรนโมเดลสำเร็จ! โมเดลที่ดีที่สุดคือ: {best_model_name}")
 
-    # ปุ่มให้ดาวน์โหลดโมเดล
+    # ✅ ปุ่มดาวน์โหลดโมเดล
     with open(model_filename, "rb") as f:
-        st.download_button("📥 ดาวน์โหลดโมเดลที่เทรนแล้ว", f, file_name=model_filename)
+        st.download_button("📥 ดาวน์โหลดโมเดล", f, file_name=model_filename)
 
     return model_filename, results
+
 
 
 st.set_page_config(page_title="Stock & Crypto Prediction Web App", page_icon="📈", layout="wide")
@@ -174,37 +152,37 @@ if selected == "🏠 Home":
 
 elif selected == "📊 Cryptocurrency Price Prediction(ML model)":
     st.title("📊 Cryptocurrency Price Prediction")
-    crypto_symbol = st.sidebar.text_input(
-        "🔠 ใส่ชื่อย่อเหรียญ (เช่น BNB, DOGE)", value="BNB").upper()
+ crypto_symbol = st.sidebar.text_input("🔠 ใส่ชื่อย่อเหรียญ (เช่น BNB, DOGE)", value="BNB").upper()
 
-    st.write(f"🔄 กำลังดึงข้อมูล {crypto_symbol} จาก Binance API...")
-    df = fetch_binance_data(symbol=f"{crypto_symbol}USDT")
+    st.write(f"🔄 กำลังดึงข้อมูล {crypto_symbol} จาก Yahoo Finance...")
+    df = fetch_yahoo_data(symbol=f"{crypto_symbol}-USD")
     df = add_indicators(df)
 
-    model_filename = f"{crypto_symbol.lower()}_best_model.pkl"
-    if not os.path.exists(model_filename):
-        st.write("🚀 กำลังเทรนโมเดลใหม่...")
-        model_filename, results = train_and_save_model(df, crypto_symbol)
-        model = joblib.load(model_filename)
+    if df.empty:
+        st.error("❌ ไม่สามารถดึงข้อมูลได้")
+    else:
+        st.success(f"✅ โหลดข้อมูลสำเร็จ ({df.shape[0]} แถว)")
+        st.write(df.head())
 
-    model = joblib.load(model_filename)
-    st.write("✅ โมเดลโหลดสำเร็จ!")
+        model_filename = f"{crypto_symbol.lower()}_best_model.pkl"
+        if not os.path.exists(model_filename):
+            st.write("🚀 กำลังเทรนโมเดลใหม่...")
+            model_filename, results = train_and_save_model(df, crypto_symbol)
 
-    st.sidebar.header("🔢 ใส่ค่า Indicator")
-    default_values = {"MA_7": df["MA_7"].iloc[-1], "MA_14": df["MA_14"].iloc[-1], "EMA_7": df["EMA_7"].iloc[-1],
-                      "EMA_14": df["EMA_14"].iloc[-1], "RSI_14": df["RSI_14"].iloc[-1], "Daily_Return": df["Daily_Return"].iloc[-1]}
-    features = {key: st.sidebar.number_input(f"{key}", value=float(
-        value), step=0.1) for key, value in default_values.items()}
+        if os.path.exists(model_filename):
+            model = joblib.load(model_filename)
+            st.write("✅ โมเดลโหลดสำเร็จ!")
 
-    if st.button(f"🔮 Predict {crypto_symbol} Price"):
-        scaler = joblib.load(f"{crypto_symbol.lower()}_scaler.pkl")
-        model = joblib.load(f"{crypto_symbol.lower()}_best_model.pkl")
+            st.sidebar.header("🔢 ใส่ค่า Indicator")
+            default_values = {col: df[col].iloc[-1] for col in ["MA_7", "MA_14", "EMA_7", "EMA_14", "RSI_14", "Daily_Return"]}
+            features = {key: st.sidebar.number_input(f"{key}", value=float(value), step=0.1) for key, value in default_values.items()}
 
-        X_input_scaled = scaler.transform([list(features.values())])
-        predicted_price = model.predict(X_input_scaled)[0]
+            if st.button(f"🔮 Predict {crypto_symbol} Price"):
+                scaler = joblib.load(f"{crypto_symbol.lower()}_scaler.pkl")
+                X_input_scaled = scaler.transform([list(features.values())])
+                predicted_price = model.predict(X_input_scaled)[0]
+                st.success(f"💰 ราคาที่คาดการณ์ของ {crypto_symbol}: ${predicted_price:.2f}")
 
-        st.success(
-            f"💰 ราคาที่คาดการณ์ของ {crypto_symbol}: ${predicted_price:.2f}")
 
     st.subheader(f"📊 กราฟราคาของ {crypto_symbol}")
     fig, ax = plt.subplots()
