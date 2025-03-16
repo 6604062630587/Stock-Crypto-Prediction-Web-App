@@ -21,93 +21,29 @@ from tensorflow.keras.callbacks import EarlyStopping
 
 
 def fetch_binance_data(symbol="BNBUSDT", interval="1d", limit=1000):
-    try:
-        url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-        response = requests.get(url)
-        
-        # ตรวจสอบว่า response สำเร็จหรือไม่
-        if response.status_code != 200:
-            # ถ้าดึงข้อมูลไม่ได้ ใช้ข้อมูลตัวอย่างแทน
-            st.warning(f"ไม่สามารถดึงข้อมูลจาก Binance API ได้ (Status code: {response.status_code})")
-            return get_sample_data(symbol)
-            
-        data = response.json()
-        
-        # ตรวจสอบว่ามีข้อมูลพอไหม
-        if len(data) < 30:  # ถ้ามีข้อมูลน้อยกว่า 30 แถว
-            st.warning(f"มีข้อมูลไม่เพียงพอจาก Binance API (ได้รับเพียง {len(data)} แถว)")
-            return get_sample_data(symbol)
-            
-        df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time",
-                          "quote_asset_volume", "trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-        df = df[["timestamp", "open", "high", "low", "close", "volume", "trades"]]
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-        df[["open", "high", "low", "close", "volume", "trades"]] = df[[
-            "open", "high", "low", "close", "volume", "trades"]].astype(float)
-        return df
-        
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการดึงข้อมูล: {str(e)}")
-        return get_sample_data(symbol)
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
+    response = requests.get(url)
+    data = response.json()
 
-
-def get_sample_data(symbol):
-    """สร้างข้อมูลตัวอย่างสำหรับกรณีที่ดึงข้อมูลจาก API ไม่ได้"""
-    # สร้างข้อมูลย้อนหลัง 100 วัน
-    st.info(f"กำลังใช้ข้อมูลตัวอย่างสำหรับ {symbol} แทน")
-    
-    dates = pd.date_range(end=pd.Timestamp.now(), periods=100)
-    
-    if symbol.upper() == "BNBUSDT" or symbol.upper() == "BNB":
-        # ราคาประมาณของ BNB
-        base_price = 500
-    elif symbol.upper() == "ETHUSDT" or symbol.upper() == "ETH":
-        base_price = 3000
-    elif symbol.upper() == "DOGEUSDT" or symbol.upper() == "DOGE":
-        base_price = 0.15
-    else:
-        base_price = 100
-    
-    # สร้างข้อมูลสุ่มโดยมีแนวโน้มขึ้น
-    close_prices = [base_price * (1 + 0.01 * i + np.random.normal(0, 0.02)) for i in range(100)]
-    
-    # สร้าง DataFrame
-    df = pd.DataFrame({
-        'timestamp': dates,
-        'open': [price * (1 + np.random.normal(0, 0.01)) for price in close_prices],
-        'high': [price * (1 + abs(np.random.normal(0, 0.015))) for price in close_prices],
-        'low': [price * (1 - abs(np.random.normal(0, 0.015))) for price in close_prices],
-        'close': close_prices,
-        'volume': [np.random.randint(10000, 1000000) for _ in range(100)],
-        'trades': [np.random.randint(1000, 10000) for _ in range(100)]
-    })
-    
+    df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time",
+                      "quote_asset_volume", "trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
+    df = df[["timestamp", "open", "high", "low", "close", "volume", "trades"]]
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df[["open", "high", "low", "close", "volume", "trades"]] = df[[
+        "open", "high", "low", "close", "volume", "trades"]].astype(float)
     return df
 
+
 def add_indicators(df):
-    try:
-        df["MA_7"] = df["close"].rolling(window=7).mean()
-        df["MA_14"] = df["close"].rolling(window=14).mean()
-        df["EMA_7"] = df["close"].ewm(span=7, adjust=False).mean()
-        df["EMA_14"] = df["close"].ewm(span=14, adjust=False).mean()
-        
-        # เพิ่มการตรวจสอบเพื่อหลีกเลี่ยงการหารด้วย 0
-        df["RSI_14"] = 100 - (100 / (1 + (df["close"].diff(1).clip(lower=0.0001).rolling(
-            14).mean() / df["close"].diff(1).clip(upper=-0.0001).abs().rolling(14).mean().replace(0, 0.0001))))
-        df["Daily_Return"] = df["close"].pct_change() * 100
-        
-        # แทนที่ค่า NaN หรือ Infinite ด้วย 0
-        df = df.replace([np.inf, -np.inf], np.nan)
-        df = df.fillna(method='ffill').fillna(0)  # ใช้ค่าก่อนหน้าถ้าเป็นไปได้ ไม่งั้นใช้ 0
-        
-        return df
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการเพิ่ม indicators: {str(e)}")
-        # สร้าง indicators พื้นฐาน
-        for col in ["MA_7", "MA_14", "EMA_7", "EMA_14", "RSI_14", "Daily_Return"]:
-            if col not in df.columns:
-                df[col] = 0  # ใส่ค่าเริ่มต้นเป็น 0
-        return df
+    df["MA_7"] = df["close"].rolling(window=7).mean()
+    df["MA_14"] = df["close"].rolling(window=14).mean()
+    df["EMA_7"] = df["close"].ewm(span=7, adjust=False).mean()
+    df["EMA_14"] = df["close"].ewm(span=14, adjust=False).mean()
+    df["RSI_14"] = 100 - (100 / (1 + (df["close"].diff(1).clip(lower=0).rolling(
+        14).mean() / df["close"].diff(1).clip(upper=0).abs().rolling(14).mean())))
+    df["Daily_Return"] = df["close"].pct_change() * 100
+    df.dropna(inplace=True)
+    return df
 
 
 def train_and_save_model(df, symbol):
@@ -115,67 +51,35 @@ def train_and_save_model(df, symbol):
     target = "close"
     X = df[features]
     y = df[target]
-    
-    # ตรวจสอบว่ามีข้อมูลเพียงพอสำหรับการแบ่ง train/test
-    if len(df) < 30:
-        st.warning("มีข้อมูลไม่เพียงพอสำหรับการสร้างโมเดล")
-        return f"{symbol.lower()}_best_model.pkl", {"Error": "ข้อมูลไม่เพียงพอ"}
-    
-    try:
-        test_size = min(0.2, 0.8 - (20 / len(df)))  # ปรับ test_size ตามขนาดข้อมูล
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=test_size, random_state=42)
-            
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
 
-        models = {
-            "Linear Regression": LinearRegression(),
-            "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
-            "XGBoost": XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
-        }
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42)
+    scaler = StandardScaler()
+    X_train_scaled = scaler.fit_transform(X_train)
+    X_test_scaled = scaler.transform(X_test)
 
-        results = {}  # เก็บผลลัพธ์ของแต่ละโมเดล
-        best_model_name = "Linear Regression"  # ค่าเริ่มต้น
-        
-        for name, model in models.items():
-            model.fit(X_train_scaled, y_train)
-            y_pred = model.predict(X_test_scaled)
-            mae = mean_absolute_error(y_test, y_pred)
-            
-            try:
-                r2 = r2_score(y_test, y_pred)
-            except:
-                r2 = 0  # ถ้าคำนวณ R² ไม่ได้ ให้เป็น 0
-                
-            results[name] = {"MAE": mae, "R² Score": r2}
+    models = {
+        "Linear Regression": LinearRegression(),
+        "Random Forest": RandomForestRegressor(n_estimators=100, random_state=42),
+        "XGBoost": XGBRegressor(n_estimators=100, learning_rate=0.1, random_state=42)
+    }
 
-        if results:  # ถ้ามีผลลัพธ์
-            best_model_name = max(results, key=lambda x: results[x]["R² Score"])
-        best_model = models[best_model_name]
-        model_filename = f"{symbol.lower()}_best_model.pkl"
+    results = {}  # เก็บผลลัพธ์ของแต่ละโมเดล
+    for name, model in models.items():
+        model.fit(X_train_scaled, y_train)
+        y_pred = model.predict(X_test_scaled)
+        mae = mean_absolute_error(y_test, y_pred)
+        r2 = r2_score(y_test, y_pred)
+        results[name] = {"MAE": mae, "R² Score": r2}
 
-        joblib.dump(best_model, model_filename)  # ✅ บันทึกโมเดล
-        joblib.dump(scaler, f"{symbol.lower()}_scaler.pkl")  # ✅ บันทึก scaler
+    best_model_name = max(results, key=lambda x: results[x]["R² Score"])
+    best_model = models[best_model_name]
+    model_filename = f"{symbol.lower()}_best_model.pkl"
 
-        return model_filename, results
-        
-    except Exception as e:
-        st.error(f"เกิดข้อผิดพลาดในการสร้างโมเดล: {str(e)}")
-        
-        # สร้างโมเดลพื้นฐานแทน
-        simple_model = LinearRegression()
-        simple_model.fit(X, y)  # ใช้ข้อมูลทั้งหมดเพื่อเทรนโมเดลพื้นฐาน
-        
-        model_filename = f"{symbol.lower()}_best_model.pkl"
-        scaler = StandardScaler()
-        scaler.fit(X)
-        
-        joblib.dump(simple_model, model_filename)
-        joblib.dump(scaler, f"{symbol.lower()}_scaler.pkl")
-        
-        return model_filename, {"Linear Regression": {"MAE": 0, "R² Score": 0}}
+    joblib.dump(best_model, model_filename)  # ✅ บันทึกโมเดล
+    joblib.dump(scaler, f"{symbol.lower()}_scaler.pkl")  # ✅ บันทึก scaler
+
+    return model_filename, results
 
 
 st.set_page_config(page_title="Stock & Crypto Prediction Web App", page_icon="📈", layout="wide")
@@ -227,31 +131,17 @@ elif selected == "📊 Cryptocurrency Price Prediction(ML model)":
         "🔠 ใส่ชื่อย่อเหรียญ (เช่น BNB, DOGE)", value="BNB").upper()
 
     st.write(f"🔄 กำลังดึงข้อมูล {crypto_symbol} จาก Binance API...")
-    
-    # ดึงข้อมูลพร้อมจัดการข้อผิดพลาด
     df = fetch_binance_data(symbol=f"{crypto_symbol}USDT")
-    
-    # เพิ่มเช็คว่าได้ DataFrame จริงๆ
-    if df is not None and isinstance(df, pd.DataFrame) and not df.empty:
-        df = add_indicators(df)
-        
-        # ตรวจสอบไฟล์โมเดลก่อนโหลด
-        model_filename = f"{crypto_symbol.lower()}_best_model.pkl"
-        
-        try:
-            if not os.path.exists(model_filename):
-                st.write("🚀 กำลังเทรนโมเดลใหม่...")
-                model_filename, results = train_and_save_model(df, crypto_symbol)
-            
-            # ทำให้แน่ใจว่าไฟล์โมเดลถูกสร้างขึ้นมาแล้ว
-            if os.path.exists(model_filename):
-                model = joblib.load(model_filename)
-                st.write("✅ โมเดลโหลดสำเร็จ!")
-            else:
-                st.error("⚠️ ไม่สามารถสร้างไฟล์โมเดลได้")
-                
-        except Exception as e:
-            st.error(f"เกิดข้อผิดพลาดในการโหลดหรือสร้างโมเดล: {str(e)}")
+    df = add_indicators(df)
+
+    model_filename = f"{crypto_symbol.lower()}_best_model.pkl"
+    if not os.path.exists(model_filename):
+        st.write("🚀 กำลังเทรนโมเดลใหม่...")
+        model_filename, results = train_and_save_model(df, crypto_symbol)
+        model = joblib.load(model_filename)
+
+    model = joblib.load(model_filename)
+    st.write("✅ โมเดลโหลดสำเร็จ!")
 
     st.sidebar.header("🔢 ใส่ค่า Indicator")
     default_values = {"MA_7": df["MA_7"].iloc[-1], "MA_14": df["MA_14"].iloc[-1], "EMA_7": df["EMA_7"].iloc[-1],
