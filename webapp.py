@@ -152,7 +152,7 @@ if selected == "🏠 Home":
 
 elif selected == "📊 Cryptocurrency Price Prediction(ML model)":
     st.title("📊 Cryptocurrency Price Prediction")
- crypto_symbol = st.sidebar.text_input("🔠 ใส่ชื่อย่อเหรียญ (เช่น BNB, DOGE)", value="BNB").upper()
+    crypto_symbol = st.sidebar.text_input("🔠 ใส่ชื่อย่อเหรียญ (เช่น BNB, DOGE)", value="BNB").upper()
 
     st.write(f"🔄 กำลังดึงข้อมูล {crypto_symbol} จาก Yahoo Finance...")
     df = fetch_yahoo_data(symbol=f"{crypto_symbol}-USD")
