@@ -49,11 +49,24 @@ def add_indicators(df):
 def train_and_save_model(df, symbol):
     features = ["MA_7", "MA_14", "EMA_7", "EMA_14", "RSI_14", "Daily_Return"]
     target = "close"
+
+    # ตรวจสอบว่า DataFrame มีข้อมูลพอหรือไม่
+    if df.empty:
+        st.error("❌ ข้อมูลว่าง! ไม่สามารถเทรนโมเดลได้")
+        return None, None
+
     X = df[features]
     y = df[target]
 
+    # ตรวจสอบค่าที่หายไป (NaN)
+    if X.isnull().sum().sum() > 0 or y.isnull().sum() > 0:
+        st.error("❌ มีค่าที่หายไปในข้อมูล! กรุณาตรวจสอบ DataFrame")
+        return None, None
+
+    # แบ่งข้อมูล train/test
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42)
+
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     X_test_scaled = scaler.transform(X_test)
@@ -72,12 +85,22 @@ def train_and_save_model(df, symbol):
         r2 = r2_score(y_test, y_pred)
         results[name] = {"MAE": mae, "R² Score": r2}
 
+    # เลือกโมเดลที่ดีที่สุด
     best_model_name = max(results, key=lambda x: results[x]["R² Score"])
     best_model = models[best_model_name]
-    model_filename = f"{symbol.lower()}_best_model.pkl"
 
-    joblib.dump(best_model, model_filename)  # ✅ บันทึกโมเดล
-    joblib.dump(scaler, f"{symbol.lower()}_scaler.pkl")  # ✅ บันทึก scaler
+    # บันทึกโมเดลและ Scaler
+    model_filename = f"{symbol.lower()}_best_model.pkl"
+    scaler_filename = f"{symbol.lower()}_scaler.pkl"
+
+    joblib.dump(best_model, model_filename)
+    joblib.dump(scaler, scaler_filename)
+
+    st.success(f"✅ เทรนโมเดลสำเร็จ! โมเดลที่ดีที่สุดคือ: {best_model_name}")
+
+    # ปุ่มให้ดาวน์โหลดโมเดล
+    with open(model_filename, "rb") as f:
+        st.download_button("📥 ดาวน์โหลดโมเดลที่เทรนแล้ว", f, file_name=model_filename)
 
     return model_filename, results
 
