@@ -20,18 +20,42 @@ from tensorflow.keras.layers import LSTM, Dense, Dropout, Conv1D, MaxPooling1D, 
 from tensorflow.keras.callbacks import EarlyStopping
 
 
+import requests
+import pandas as pd
+import streamlit as st
+
 def fetch_binance_data(symbol="BNBUSDT", interval="1d", limit=1000):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval={interval}&limit={limit}"
-    response = requests.get(url)
-    data = response.json()
+    
+    try:
+        response = requests.get(url)
+        response.raise_for_status()  # ตรวจสอบ HTTP Error (เช่น 404, 500)
+        data = response.json()
+        
+        if not data:
+            st.error("❌ ไม่พบข้อมูลจาก Binance API")
+            return pd.DataFrame()  # ส่ง DataFrame ว่างกลับไป
 
-    df = pd.DataFrame(data, columns=["timestamp", "open", "high", "low", "close", "volume", "close_time",
-                      "quote_asset_volume", "trades", "taker_buy_base_asset_volume", "taker_buy_quote_asset_volume", "ignore"])
-    df = df[["timestamp", "open", "high", "low", "close", "volume", "trades"]]
-    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-    df[["open", "high", "low", "close", "volume", "trades"]] = df[[
-        "open", "high", "low", "close", "volume", "trades"]].astype(float)
-    return df
+        # แปลง JSON เป็น DataFrame
+        df = pd.DataFrame(data, columns=[
+            "timestamp", "open", "high", "low", "close", "volume", "close_time",
+            "quote_asset_volume", "trades", "taker_buy_base_asset_volume",
+            "taker_buy_quote_asset_volume", "ignore"
+        ])
+
+        df = df[["timestamp", "open", "high", "low", "close", "volume", "trades"]]
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+
+        # แปลงค่าเป็นตัวเลข
+        df[["open", "high", "low", "close", "volume", "trades"]] = df[[
+            "open", "high", "low", "close", "volume", "trades"]].astype(float)
+
+        return df
+    
+    except requests.exceptions.RequestException as e:
+        st.error(f"❌ เกิดข้อผิดพลาดในการดึงข้อมูลจาก Binance API: {e}")
+        return pd.DataFrame()
+
 
 
 def add_indicators(df):
