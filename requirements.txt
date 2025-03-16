@@ -6,3 +6,10 @@ matplotlib
 joblib
 pandas
 numpy
+requests
+plotly
+seaborn
+datetime
+python-dotenv
+ccxt
+xgboost
