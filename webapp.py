@@ -66,12 +66,14 @@ def train_and_save_model(df, symbol):
     X = df[features]
     y = df[target]
 
-    if X.isnull().sum().sum() > 0 or y.isnull().sum() > 0:
+    # ✅ แก้ไขเงื่อนไขให้ถูกต้อง
+    if X.isnull().sum().sum() > 0 or y.isnull().any():
         st.error("❌ มีค่าที่หายไปในข้อมูล! กรุณาตรวจสอบ DataFrame")
         return None, None
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42)
+        X, y, test_size=0.2, random_state=42
+    )
 
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
@@ -99,11 +101,11 @@ def train_and_save_model(df, symbol):
 
     st.success(f"✅ เทรนโมเดลสำเร็จ! โมเดลที่ดีที่สุดคือ: {best_model_name}")
 
-    # ✅ ปุ่มดาวน์โหลดโมเดล
     with open(model_filename, "rb") as f:
         st.download_button("📥 ดาวน์โหลดโมเดล", f, file_name=model_filename)
 
     return model_filename, results
+
 
 
 
