@@ -13,3 +13,4 @@ datetime
 python-dotenv
 ccxt
 xgboost
+streamlit-option-menu
